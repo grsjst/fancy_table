@@ -1,0 +1,5 @@
+package.json
+fancy_table.sublime-workspace
+web/node_modules/*
+yarn.lock
+.DS_Store
