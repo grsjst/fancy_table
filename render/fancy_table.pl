@@ -119,7 +119,15 @@ match_header(Options,Rows,Header) :-
 	member(header(Header),Options),
 	header_keys(Header,Tag,HeaderKeys),
 	subset(HeaderKeys,CommonKeys),
-	forall(member(Row,Rows), Row =.. [Tag|_]).
+	forall(member(Row,Rows), Row =.. [Tag|_]),!.
+
+match_header(Options,Rows,Header) :-
+	member(header(Header),Options),
+	header_keys(Header,Tag,HeaderKeys),
+	length(HeaderKeys,N),
+	forall(member(Row,Rows), (Row =.. [Tag|Values],length(Values,N))),!.
+
+
 
 common_keys([],[]).
 common_keys([Row],Keys) :-
