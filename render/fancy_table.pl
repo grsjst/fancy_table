@@ -35,136 +35,89 @@ Options include:
 %%	term_rendering(+Rows:list, +Vars:list, +Options:list)//
 %
 %	Renders Rows as a fancy_table.
-% 	Supported formats
-%   Rows = [[2,2,1],[1,2,3]]. 
-%   Rows = [[population(1),name("aaa"),country("fr")]] 
-%   Rows = [[population-1,name - "aaa",country - "fr"]]
-%   Rows = [[population=1,name="aaa",country="fr"]]
-%   Rows = [a(2,2,1),a(1,2,3)]
-%   Rows = [captial{populaton:1,name:"aa",country:"fr"}]
-%   NRows = [capital(population-1,name-"aaa",country-"fr"),]
-term_rendering(Term, _Vars, Options) -->
-	{   
-		debug(fancy_table, "try fancy_table with header ~p",[Term]),
-		normalise_rows(Term,Rows),
-		debug(fancy_table, "normalised ~w",[Rows]),
-		match_header(Options,Rows,Header),!,
-		debug(fancy_table, "use fancy table - header:~w, options:~w",[Header,Options]),
-		forall(member(fancy_file(GittyFile),Options),use_gitty_file(GittyFile)),
-		Header =.. [_|SortKeys],
-		sort_rows(Rows,SortKeys,SortedRows),
-		debug(fancy_table,"sorted rows:~p",[SortedRows]),
-		qualify_rows(SortedRows,QRows)
+term_rendering(Dicts, _Vars, Options) -->
+	{
+			% test for all dicts
+			to_pairs_list(Dicts,Tag,PairsList), % Rows = list of pairs
+			match_header(Options,Tag,PairsList,FancyHeader),!,
+			debug(fancy_table, "use fancy table - header:~w, options:~w",[FancyHeader,Options]),
+			header_keys(FancyHeader,Tag,SortKeys,Keys),
+			order_pairs_list(PairsList,Keys,OrderedPairsList),
+			sort_pairs_list(OrderedPairsList,SortKeys,SortedPairsList),
+			delete(Options,header(_),NOptions)
 	},
-	fancy_table_rendering(Header,QRows,Options).
+	fancy_table_rendering(FancyHeader,SortedPairsList,NOptions). 
 
-term_rendering(Term, _Vars, Options) -->
-	{   
-		debug(fancy_table, "try fancy_table without header",[]),
-		normalise_rows(Term,Rows),
-		qualify_rows(Rows,QRows),
-		debug(fancy_table,"~p, ~w ",[Rows,QRows])
-	},
-	fancy_table_rendering(QRows,Options).
-
-qualify_rows([],[]).
-qualify_rows([Row|Rows],[QRow|QRows]) :-
-	Row =.. [Tag|Pairs],
-	debug(fancy_table,"oairs:~w",[Pairs]),
-	findall(QValue,(member(K-V,Pairs),QValue =.. [K,V]),QValues),
-	QRow =..[Tag|QValues],
-	qualify_rows(Rows,QRows).
-
-normalise_rows([],[]).
-normalise_rows([Row|Rows],[NRow|NRows]) :-
-	normalise_row(Row,NRow),
-	normalise_rows(Rows,NRows).
-
-normalise_row(Dict,NRow) :-
-	is_dict(Dict),!,
+to_pairs_list([],_,[]).
+to_pairs_list([Dict|Dicts],Tag, [Pairs|PairsList]) :-
 	dict_pairs(Dict,Tag,Pairs),
-	(var(Tag) -> NTag = row ; NTag = Tag), 
-	NRow =.. [NTag|Pairs].
+	to_pairs_list(Dicts,Tag,PairsList).
 
-normalise_row(Row,NRow) :-
-	qpairs(Row,NRow).
-
-qpairs(Row,NRow) :-
-	\+ is_list(Row),
-	compound(Row),!,
-	Row =.. [T|Pairs],
-	pairs(Pairs,NPairs),
-	NRow =.. [T|NPairs].
-
-qpairs(Pairs,row(NPairs)) :-
-	is_list(Pairs),
-	pairs(Pairs,NPairs). 
-
-pairs([],[]).
-pairs([Pair|Pairs],[NPair|NPairs]) :-
-	pair(Pair,NPair),
-	pairs(Pairs,NPairs).
-
-pair(K-V,K-V) :- !. 
-pair(K=V,K-V) :- !. 
-pair(K:V,K-V) :- !. 
-pair(Pair,K-V) :-
-	compound(Pair),
-	Pair =.. [K,V],!.
-pair(V,value-V). 
-
-%! match_header(+Options,+Rows,-Header) is nondet
-match_header(Options,Rows,Header) :-
-	common_keys(Rows,CommonKeys),
+%! match_header(+Options,+Tag,+PairsList,-Header) is nondet
+match_header(Options,Tag,PairsList,Header) :-
+	common_keys(PairsList,CommonKeys),
 	member(header(Header),Options),
-	header_keys(Header,Tag,HeaderKeys),
-	subset(HeaderKeys,CommonKeys),
-	forall(member(Row,Rows), Row =.. [Tag|_]),!.
+	header_keys(Header,Tag,_,HeaderKeys),
+	subset(HeaderKeys,CommonKeys).
 
-match_header(Options,Rows,Header) :-
-	member(header(Header),Options),
-	header_keys(Header,Tag,HeaderKeys),
-	length(HeaderKeys,N),
-	forall(member(Row,Rows), (Row =.. [Tag|Values],length(Values,N))),!.
-
-
-
-common_keys([],[]).
-common_keys([Row],Keys) :-
-	Row =.. [_|Pairs],
-	pairs_keys(Pairs,Keys).
-common_keys([Row|Rows],CommonKeys) :-
-	Row =.. [_|Pairs],
+% common_keys([a-3,c-1,b-2],[b-2,a-2,c-2,d-0]],[a,b,c])
+common_keys([],[]) :- !.
+common_keys([Pairs],Keys) :- pairs_keys(Pairs,Keys).
+common_keys([Pairs|PairsList],CommonKeys) :-
 	pairs_keys(Pairs,Keys),
-	common_keys(Rows,CKeys),
+	common_keys(PairsList,CKeys),
 	intersection(Keys,CKeys,CommonKeys).
 
-header_keys(Header,Tag,HeaderKeys) :-
+header_keys(Header,Tag,SortKeys,HeaderKeys) :-
 	Header =.. [Tag|SortKeys],
 	findall(HKey,(member(SortKey,SortKeys),SortKey =.. [HKey,_]),HeaderKeys).
 
+% order_pairs_list([[a-3,c-1,b-2],[b-2,a-2,c-2]],[a,b,c],Ordered)
+order_pairs_list([],_,[]) .
+order_pairs_list([Pairs|PairsList],Keys,[OrderedPairs|OrderedPairsList]) :-
+	order_pairs(Pairs,Keys,OrderedPairs),
+	order_pairs_list(PairsList,Keys,OrderedPairsList).
 
-% sort_rows([row(2,1,3),row(1,1,1),row(1,2,2)],[a(@=<),b(@>=),c(_)],Sorted).
-sort_rows(Rows,SortKeys,Sorted) :-
-	sort_rows(Rows,0,SortKeys,Sorted).
+order_pairs(Pairs,[],Pairs) :- !.
+order_pairs(Pairs,[K|Ks],[K-V|OrderedPairs]) :-
+	select(K-V,Pairs,RPairs),!,
+	order_pairs(RPairs,Ks,OrderedPairs).
 
-sort_rows(Rows,N,SortKeys,Rows) :- length(SortKeys,N),!.
-sort_rows(Rows,I,SortKeys,Sorted) :-
+
+% sort_pairs_list([[a-3,b-2,c-1],[a-2,b-2,c-2]],[a(@>=),b(@=<)],Sorted)
+sort_pl(PairsList,[],PairsList) :- !.
+sort_pl(PairsList,[SortKey|SortKeys],SortedPairsList) :-
+	SortKey =.. [Key,Order],
+	nonvar(Order),!,
+	nth1(1,Pairs,PairsList), 
+	nth1(I,Pairs,Key-_),forall(member(Pairs,PairsList),nth1(I,Pairs,Key-_)), % to ensure we sort Key 
+	sort_pl(PairsList,SortKeys,PartialSortedPairsList),
+	sort([I,2],Order,PartialSortedPairsList,SortedPairsList).
+
+sort_pl(PairsList,[_|SortKeys],SortedPairsList) :-
+	sort_pl(PairsList,SortKeys,SortedPairsList).
+
+
+% sort_pairs_list([[a-3,b-2,c-1],[a-2,b-2,c-2]],[a(@>=),b(@=<)],Sorted)
+sort_pairs_list(PairsList,SortKeys,PairsList) :-
+	sort_pairs_list(PairsList,0,SortKeys,PairsList).
+
+sort_pairs_list(PairsList,N,SortKeys,PairsList) :- length(SortKeys,N),!.
+sort_pairs_list(PairsList,I,SortKeys,SortedPairsList) :-
 	nth1(I,SortKeys,SortKey),
 	SortKey =.. [_Key,Order],
 	nonvar(Order),!,
 	J is I + 1,
-	sort_rows(Rows,J,SortKeys,TmpSorted),
-	sort(I,Order,TmpSorted,Sorted).
-
-sort_rows(Rows,I,SortKeys,Sorted) :-
+	sort_pairs_list(PairsList,J,SortKeys,PartialSortedPairsList),
+	sort([I,2],Order,PartialSortedPairsList,SortedPairsList).
+	
+sort_pairs_list(PairsList,I,SortKeys,SortedPairsList) :-
 	J is I + 1,
-	sort_rows(Rows,J,SortKeys,Sorted).	
-
+	sort_pairs_list(PairsList,J,SortKeys,SortedPairsList).
 
 fancy_table_rendering(Header,Rows,Options) -->
 	{
-		header_keys(Header,Tag,Keys),
+		header_keys(Header,Tag,_,Keys),
 		NHeader =.. [Tag|Keys]
 		% debug(fancy_table, "Tag: ~w, Keys:~w, Rows:~w, Options:~w, Header:~w",[Tag, Keys, Rows, Options,Header])
 	},
@@ -274,12 +227,10 @@ def_fancy_term(ColName,Term, Options) -->
 :- abolish(swish_render_table:row/4).
 swish_render_table:row(Row, Options) --> {debug(fancy_table,"using fancy_row: ~w",[Row])},fancy_row(Row,Options).
 
-
 fancy_row([],_) --> [].
-fancy_row([QCell|Cells], Options) -->
+fancy_row([ColName-Cell|Cells], Options) -->
 	{
-		debug(fancy_table,"fancy_row: ~w", [QCell]),
-		QCell =.. [ColName,Cell]
+		debug(fancy_table,"fancy_row: colname: ~w, value:~w", [ColName,Cell])
 	},
 	user_or_default_fancy_term(ColName,Cell,Options),
 	fancy_row(Cells, Options).
