@@ -38,15 +38,15 @@ Options include:
 term_rendering(Dicts, _Vars, Options) -->
 	{
 			% test for all dicts
-			to_pairs_list(Dicts,Tag,PairsList), % Rows = list of pairs -> to rows ()
-			match_header(Options,Tag,PairsList,FancyHeader),!,
+			to_rows(Dicts,Tag,Rows), % Rows = list of pairs -> to rows ()
+			match_header(Options,Tag,Rows,FancyHeader),!,
 			debug(fancy_table, "use fancy table - header:~w, options:~w",[FancyHeader,Options]),
 			header_keys(FancyHeader,Tag,SortKeys,Keys),
-			order_pairs_list(PairsList,Keys,OrderedPairsList),
-			sort_pairs_list(OrderedPairsList,SortKeys,SortedPairsList),
+			reorder_values(Rows,Keys,OrderedRows),
+			sort_rows(OrderedRows,SortKeys,SortedRows),
 			delete(Options,header(_),NOptions)
 	},
-	fancy_table_rendering(FancyHeader,SortedPairsList,NOptions). 
+	fancy_table_rendering(FancyHeader,SortedRows,NOptions). 
 
 to_rows([],_,[]).
 to_rows([Dict|Dicts],Tag,[Row|Rows]) :-
@@ -71,47 +71,50 @@ common_keys([Row|Rows],CommonKeys) :-
 	common_keys(Rows,CKeys),
 	intersection(Keys,CKeys,CommonKeys).
 
-% the rows have consistently ordered keys
-ordered_keys([], _).
-ordered_keys([Row|Rows], Keys) :-
-	Row =.. [_|Pairs],
-	forall(nth1(I,Keys,Key),nth1(I,Pairs,Key-_)),
-	ordered_keys(Rows,Keys).
-
 header_keys(Header,Tag,SortKeys,HeaderKeys) :-
 	Header =.. [Tag|SortKeys],
 	findall(HKey,(member(SortKey,SortKeys),SortKey =.. [HKey,_]),HeaderKeys).
 
 % reorder_values([row(a-3,c-1,b-2),row(b-2,a-2,c-2),row(a,b,c)],Ordered)
-reorder_values([],_,[]) .
+reorder_values([],_,[]).
 reorder_values([Row|Rows],Keys,[OrderedRow|OrderedRows]) :-
 	Row =.. [_|Pairs],
 	order_pairs(Pairs,Keys,OrderedPairs),
 	OrderedRow =.. [_|OrderedPairs],
-	reorder_values(PairsList,Keys,OrderedRows).
+	reorder_values(Rows,Keys,OrderedRows).
 
 order_pairs(Pairs,[],Pairs) :- !.
 order_pairs(Pairs,[K|Ks],[K-V|OrderedPairs]) :-
 	select(K-V,Pairs,RPairs),!,
 	order_pairs(RPairs,Ks,OrderedPairs).
 
+get_keys(Rows,Keys) :-
+	get_keys(Rows,1,Keys).
+get_keys(Rows,I,[]) :- forall(member(Row,Rows),(functor(Row,_,N), I > N)).
+get_keys(Rows,I,[Key|Keys]) :-
+	Rows = [FirstRow|_],
+	arg(I,FirstRow,Key-_),
+	forall(member(Row,Rows),arg(I,Row,Key-_)),
+	J is I + 1,
+	get_keys(Rows,J,Keys).
 
-% sort_rows([row(a-3,b-2,c-1),row(a-2,b-2,c-2)],[a(@>=),b(@=<)],Sorted)
-sort_rows(Rows,[],Rows) :- !.
-sort_rows(Rows,I,SortKeys,SortedRows) :-
-	nth1(I,SortKeys,SortKey),
+
+% sort_rows([row(a-3,b-2,c-1),row(a-2,b-2,c-2),row(a-2,b-1,c-2)],[a(@>=),b(@=<)],Sorted)
+sort_rows(Rows,SortKeys,SortedRows) :-
+	get_keys(Rows,Keys),
+	sort_rows(Rows,Keys,SortKeys,SortedRows).
+
+sort_rows(Rows,_,[],Rows) :- !.
+sort_rows(Rows,Keys,[SortKey|SortKeys],SortedRows) :-
 	SortKey =.. [Key,Order],
 	nonvar(Order),!,
-	forall(member(Row,Rows),arg(I,Row,Key-_)),
-	
-	nth1(1,FirstRow), FirstRow =.. [_|Pairs], 
-	% fixme nth1(I,Pairs,Key-_),forall(member(Row,Rows),(Row =.. [_|Pairs],nth1(I,Pairs,Key-_)), % to ensure we sort Key 
-	sort_rows(PairsList,SortKeys,PartialSortedPairsList),
-	sort([I,2],Order,PartialSortedPairsList,SortedPairsList).
+	nth1(I,Keys,Key),
+	sort_rows(Rows,Keys,SortKeys,PartialSortedRows),
+	debug(fancy_table,"i: ~w, key:~w, keys:~w, order:~w, rows:~w",[I,Key,Keys,Order,Rows]),
+	sort([I,2],Order,PartialSortedRows,SortedRows).
 
-sort_rows(PairsList,[_|SortKeys],SortedPairsList) :-
-	sort_rows(PairsList,SortKeys,SortedPairsList).
-
+sort_rows(Rows,Keys,[_|SortKeys],SortedRows) :-
+	sort_rows(Rows,Keys,SortKeys,SortedRows).
 
 fancy_table_rendering(Header,Rows,Options) -->
 	{
