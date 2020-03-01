@@ -63,7 +63,18 @@ term_rendering(Dicts, _Vars, Options) -->
 		sort_rows(OrderedRows,SortKeys,SortedRows),
 		delete(Options,header(_),NOptions)
 	},
-	fancy_table_rendering(FancyHeader,SortedRows,NOptions). 
+	fancy_table_rendering(FancyHeader,SortedRows,NOptions).
+
+term_rendering(Dicts, _Vars, Options) -->
+	{
+		% debug(fancy_table, "try table (with fancy terms): ~p",[Dicts]),
+		to_rows(Dicts,Tag,Rows), % Rows = list of compounds -> to rows ()
+		common_keys(Rows,Tag,Keys),
+		FancyHeader =.. [Tag|Keys],
+		delete(Options,header(_),NOptions)
+	},
+	fancy_table_rendering(FancyHeader,Rows,NOptions).
+
 
 %!	to_rows(+Dicts:list(dict),-Tag:atom, -Rows:list(term)) is det.
 %	converts dicts to corresponding compound representation
@@ -102,6 +113,11 @@ common_keys([Row|Rows],CommonTag,CommonKeys) :-
 	intersection(Keys,CKeys,CommonKeys).
 
 header_keys(Header,Tag,SortKeys,HeaderKeys) :-
+	Header =.. [Tag|HeaderKeys],
+	forall(member(Key,HeaderKeys),atom(Key)),!,
+	findall(SortKey,(member(Key,HeaderKeys),SortKey =.. [Key,_]),SortKeys).
+
+header_keys(Header,Tag,SortKeys,HeaderKeys) :-
 	Header =.. [Tag|SortKeys],
 	findall(HKey,(member(SortKey,SortKeys),SortKey =.. [HKey,_]),HeaderKeys).
 
@@ -136,7 +152,7 @@ sort_rows(Rows,Keys,[SortKey|SortKeys],SortedRows) :-
 	nonvar(Order),!,
 	nth1(I,Keys,Key),
 	sort_rows(Rows,Keys,SortKeys,PartialSortedRows),
-	debug(fancy_table,"i: ~w, key:~w, keys:~w, order:~w, rows:~p",[I,Key,Keys,Order,Rows]),
+	% debug(fancy_table,"i: ~w, key:~w, keys:~w, order:~w, rows:~p",[I,Key,Keys,Order,Rows]),
 	sort([I,2],Order,PartialSortedRows,SortedRows).
 
 sort_rows(Rows,Keys,[_|SortKeys],SortedRows) :-
@@ -161,10 +177,9 @@ fancy_table_rendering(Header,Rows,Options) -->
 				debug(fancy_table,"load gittyfile: ~w",[GittyFile]),
 				use_gitty_file(GittyFile)
 			) ; true)
-		% debug(fancy_table, "Tag: ~w, Keys:~w, Rows:~w, Options:~w, Header:~w",[Tag, Keys, Rows, Options,Header])
 	},
 	html(div([class(['export-dom']), style('display:inline-block'),
-		   'data-render'('Fancy Table with Header')
+		   'data-render'('Fancy Table')
 		 ],
 		 [  
 		 	\table_term_rendering(Rows,_,[header(NHeader)|Options]),
@@ -175,11 +190,11 @@ fancy_table_footer([],_) --> html(p("0 records")).
 fancy_table_footer(Rows,Options) -->
 	{
 		length(Rows,N),
-		format(string(FooterMesg),"~w records",[N])
+		format(string(FooterMesg),"~w records",[N]),
+		common_keys(Rows,Tag,Keys),
+		Header =.. [Tag|Keys]
 	},
-	html(p([FooterMesg," ",\export_term_rendering(Rows,_,Options)])).
-
-
+	html(p([FooterMesg," ",\export_term_rendering([Header|Rows],_,Options)])).
 
 %%	fancy_term(Term, +Options)
 %
@@ -192,14 +207,23 @@ fancy_table_footer(Rows,Options) -->
 
 :- multifile swish_render_fancy_table:fancy_term/5.
 
-user_or_default_fancy_term(ColName,Cell,Options) -->  {debug(fancy_table,"col:~w, cell:~w, ops: ~w",[ColName,Cell,Options])},fancy_term(ColName,Cell,Options).
+user_or_default_fancy_term(ColName,Cell,Options) -->  
+	% {debug(fancy_table,"col:~w, cell:~w, ops: ~w",[ColName,Cell,Options])},
+	fancy_term(ColName,Cell,Options).
+
 user_or_default_fancy_term(ColName,Cell,Options) --> def_fancy_term(ColName,Cell,Options).
 
 def_fancy_term(_,Date, _Options) -->
 	{   
 		Date = date(_,_,_),!,
-		debug(fancy_table,"date: ~w",[Date]),
 		format_time(string(DateStr),"%d %b %Y",Date)
+	},
+	html(td(\term(DateStr,[]))).
+
+def_fancy_term(_,DateTime, _Options) -->
+	{   
+		DateTime = date(_,_,_,_,_,_,_,_,_),!,
+		format_time(string(DateStr),"%FT%T%z",DateTime) % ISO8601
 	},
 	html(td(\term(DateStr,[]))).
 
@@ -208,8 +232,7 @@ def_fancy_term(_,IRI, _Options) -->
 	{ 
 		atom(IRI),
 		rdf_iri(IRI),
-		rdfs_label(IRI,Label), 
-		debug(fancy_table,"iri: ~w, label:~w", [IRI,Label])
+		rdfs_label(IRI,Label)
 	},
 	html(td(\term(Label,[]))).
 
@@ -223,23 +246,21 @@ def_fancy_term(_,URI, _Options) -->
 def_fancy_term(ColName,value(Term), Options) --> def_fancy_term(ColName,Term, Options).
 
 % default
-def_fancy_term(ColName,Term, _Options) -->
-	{ 
-		debug(fancy_table,"use default for ColName: ~w, Term:~w", [ColName,Term])
-	},
+def_fancy_term(_ColName,Term, _Options) -->
+	% {debug(fancy_table,"use default for ColName: ~w, Term:~w", [ColName,Term])},
 	html(td(\term(Term,[]))).
-
 
 % create a hook in swish_render_table to render specific terms
 :- abolish(swish_render_table:row/4).
-swish_render_table:row(Row, Options) --> {debug(fancy_table,"using fancy_row: ~w",[Row])},fancy_row(Row,Options).
+swish_render_table:row(Row, Options) --> 
+	% {debug(fancy_table,"using fancy_row: ~w",[Row])},
+	fancy_row(Row,Options).
 
-fancy_row([],_) --> [].
-fancy_row([ColName-Cell|Cells], Options) -->
-	{
-		debug(fancy_table,"fancy_row: colname: ~w, value:~w", [ColName,Cell])
-	},
+fancy_row([],_) --> !,[].
+fancy_row([ColName-Cell|Cells], Options) --> 
 	user_or_default_fancy_term(ColName,Cell,Options),
 	fancy_row(Cells, Options).
+
+
 
 
