@@ -6,6 +6,7 @@
 :- use_module(library(semweb/rdfs)).
 :- use_module(library(http/term_html)).
 :- use_module(library(http/html_write)).
+:- use_module(library(http/js_write)).
 :- use_module(library(csv)).
 :- use_module(swish(lib/render)).
 :- use_module(swish(lib/render/table),[term_rendering/5 as table_term_rendering]).
@@ -48,6 +49,9 @@
 %%	term_rendering(+Rows:list, +Vars:list, +Options:list)//
 %
 %	Renders Rows as a fancy_table.
+% 	Options:
+% 	- fancy_term_file(GittyFile) GittyFile specfies user defined rendering for particular cells
+%	- export(Format,FName)  FName is the filename suggested for export
 term_rendering(Dicts, _Vars, Options) -->
 	{
 		% debug(fancy_table, "try fancy table: ~p",[Dicts]),
@@ -74,6 +78,7 @@ to_rows([Dict|Dicts],Tag,[Row|Rows]) :-
 	to_rows(Dicts,Tag,Rows),
 	dict_pairs(Dict,Tag,Pairs),
 	Row =.. [Tag|Pairs].
+
 
 %! 	match_header(+Options,+Rows,-Header) is nondet.
 %	from the Options select a header that matches the given Tag and the layout of the Rows 
@@ -150,7 +155,12 @@ get_keys(Rows,I,[Key|Keys]) :-
 fancy_table_rendering(Header,Rows,Options) -->
 	{
 		header_keys(Header,Tag,_,Keys),
-		NHeader =.. [Tag|Keys]
+		NHeader =.. [Tag|Keys],
+		(memberchk(fancy_terms_file(GittyFile),Options) -> 
+			(
+				debug(fancy_table,"load gittyfile: ~w",[GittyFile]),
+				use_gitty_file(GittyFile)
+			) ; true)
 		% debug(fancy_table, "Tag: ~w, Keys:~w, Rows:~w, Options:~w, Header:~w",[Tag, Keys, Rows, Options,Header])
 	},
 	html(div([class(['export-dom']), style('display:inline-block'),
@@ -158,40 +168,112 @@ fancy_table_rendering(Header,Rows,Options) -->
 		 ],
 		 [  
 		 	\table_term_rendering(Rows,_,[header(NHeader)|Options]),
-		 	\fancy_table_footer(Rows)		 	
+		 	\fancy_table_footer(Rows,Options)		 	
 		 ])).
-
-fancy_table_footer([]) --> html(p("0 records")).
-fancy_table_footer(Rows) -->
+ 
+fancy_table_footer([],_) --> html(p("0 records")).
+fancy_table_footer(Rows,Options) -->
 	{
 		length(Rows,N),
 		format(string(FooterMesg),"~w records",[N]),
-		to_csv(Rows,CSV,[]),
-		Rows = [R|_], R =.. Tag, 
-		format(string(DataURI),"data:~w,~w",["text/csv",CSV]),
-		format(string(FName),"~w.csv",[Tag])
-
+		(memberchk(export(FName,WBOptions),Options) -> 
+			(
+				debug(fancy_table,"export fname: ~w, options:~w,",[FName,WBOptions])
+			) ; 
+			(
+				WBOptions = _{bookType:'xlsx'},
+				FName = "export.xlsx"
+			)),
+		to_xlsx(Rows,WB,WBOptions)
 	},
-	html([p([FooterMesg," ",a([href(DataURI),download(FName)],"(export)")])]).
+	html([
+		p([FooterMesg," ",a([href("")],"(export)"),
+		\js_script({|javascript(WB,FName,WBOptions)||
+(function() {
+  if ( $.ajaxScript ) {
+  	console.log("from fancy_table.pl");
+  	var a = $.ajaxScript.parent().find("a")[0];
+	requirejs.config({
+    	urlArgs: "ts="+new Date().getTime(),  /* prevent caching during development */
+	    paths: {
+	    	xlsx: '../node_modules/xlsx/dist/xlsx.full.min'
+	    }
+	 });
 
-to_csv(Rows,CSV, Options) :-
-	setup_call_cleanup(
-		new_memory_file(Handle),
-		(setup_call_cleanup(
-			open_memory_file(Handle, write, Out),
-			forall(member(Row,Rows), (atomize_row(Row,ARow),csv_write_stream(Out, [ARow], Options))),
-			close(Out)),
-		memory_file_to_string(Handle, CSV)),
-		free_memory_file(Handle)).
-	
+	require(["jquery","xlsx"], function($,XLSX) {
+		var wb = WB;
+		var wbOptions = WBOptions;
+		var fname = FName;
+		$(a).click(function(e){
+			e.preventDefault();
+			XLSX.writeFile(wb, fname, wbOptions);
+			});
+	});  }
+})();
+		  |})
+		])]).
 
-% atomize rows so they can be exported to CSV
-atomize_row(Row,ARow) :-
-	Row =.. [Tag|Values],
-	findall(AValue,
-		(member(Value,Values), (atomic(Value) -> AValue = Value ; format(atom(AValue),"~w",[Value]))),
-		AValues),
-	ARow =.. [Tag|AValues].
+to_xlsx(Rows,CSF_WB,_Options) :-
+	Rows = [Row|_], functor(Row,_,NColumns),
+	length(Rows,NRows),
+	to_a1(1,1,TopLeft),
+	to_a1(NColumns,NRows,BottomRight),
+	format(atom(Range),"~w:~w",[TopLeft,BottomRight]),
+	to_csf_sheet(Rows,Sheet),
+	NSheet = Sheet.put('!ref',Range),
+	CSF_WB = _{
+		'Sheets' : _{
+			'Sheet1' : NSheet
+		},
+		'SheetNames' : ['Sheet1']  
+	}.
+
+to_csf_sheet(Rows,Sheet) :-
+	to_csf_sheet(Rows,1,Sheet).
+
+to_csf_sheet([],_,_{}).
+to_csf_sheet([Row|Rows],R,Sheet) :-
+	Row =.. [_|Pairs],
+	findall(Cell,(nth1(C,Pairs,_-Value),to_csf_cell(C,R,Value,Cell)),Cells),
+	merge_dicts(Cells,SheetRow),
+	debug(fancy_table,"row: ~w, cells: ~w",[Row,SheetRow]),
+	NR is R + 1,
+	to_csf_sheet(Rows,NR,SheetRows),
+	Sheet = SheetRows.put(SheetRow).
+
+merge_dicts([],_{}).
+merge_dicts([Dict|Dicts],MergedDict) :-
+	merge_dicts(Dicts,MergedDict0),
+	MergedDict = MergedDict0.put(Dict).
+
+to_csf_cell(C,R,Value,CSFCell) :-
+	to_a1(C,R,A1),
+	to_cell(Value,Cell),
+	CSFCell = _{}.put(A1,Cell).
+
+to_cell(Date,_{v:Value,t:d, z:'dd/mm/yyyy'}) :- Date = date(_,_,_),format_time(atom(Value),"%FT%T%z",Date),!. % ISO8601
+to_cell(DateTime,_{v:Value,t:d, z:'dd/mm/yyyy h:mm'}) :- DateTime = date(_,_,_,_,_,_,_,_,_),format_time(atom(Value),"%FT%T%z",DateTime),!. % ISO8601	
+to_cell(Boolean,_{v:Boolean,t:b}) :- memberchk(Boolean,[true,false]),!.
+to_cell(Number,_{v:Number,t:n}) :- number(Number),!.
+to_cell(String,_{v:String,t:s}) :- string(String),!.
+to_cell(Atom,_{v:Value,t:s}) :- atom(Atom),atom_string(Atom,Value),!.
+to_cell(Term,Cell) :- Term =.. [_,Value],!, to_cell(Value,Cell). % tag(100) -> 100
+to_cell(Term,_{v:Value,t:s}) :- term_string(Term,Value),!,debug(fancy_table,"unknown type: ~p",[Term]).
+
+to_a1(C,R,A1) :-
+    to_base(26,C,L),
+    As = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z'],
+    findall(A0,(member(N,L),nth1(N,As,A0)),Txt),
+    text_to_string(Txt,Alpha),
+    format(atom(A1),"~w~w",[Alpha,R]).
+
+to_base(Base,N,[R]) :-
+    divmod(N, Base, 0, R),!.
+
+to_base(Base,N,L) :-
+    divmod(N, Base, Q, R),
+    to_base(Base,Q,Rs),
+    append(Rs,[R],L).
 
 
 %%	fancy_term(Term, +Options)
@@ -208,23 +290,23 @@ atomize_row(Row,ARow) :-
 user_or_default_fancy_term(ColName,Cell,Options) -->  {debug(fancy_table,"col:~w, cell:~w, ops: ~w",[ColName,Cell,Options])},fancy_term(ColName,Cell,Options).
 user_or_default_fancy_term(ColName,Cell,Options) --> def_fancy_term(ColName,Cell,Options).
 
-def_fancy_term(_,Date, Options) -->
+def_fancy_term(_,Date, _Options) -->
 	{   
 		Date = date(_,_,_),!,
 		debug(fancy_table,"date: ~w",[Date]),
 		format_time(string(DateStr),"%d %b %Y",Date)
 	},
-	html(td(\term(DateStr, Options))).
+	html(td(\term(DateStr,[]))).
 
 % use label for IRIs if defined
-def_fancy_term(_,IRI, Options) -->
+def_fancy_term(_,IRI, _Options) -->
 	{ 
 		atom(IRI),
 		rdf_iri(IRI),
 		rdfs_label(IRI,Label), 
 		debug(fancy_table,"iri: ~w, label:~w", [IRI,Label])
 	},
-	html(td(\term(Label, Options))).
+	html(td(\term(Label,[]))).
 
 % include a link for uri
 def_fancy_term(_,URI, _Options) -->
@@ -236,11 +318,11 @@ def_fancy_term(_,URI, _Options) -->
 def_fancy_term(ColName,value(Term), Options) --> def_fancy_term(ColName,Term, Options).
 
 % default
-def_fancy_term(ColName,Term, Options) -->
+def_fancy_term(ColName,Term, _Options) -->
 	{ 
 		debug(fancy_table,"use default for ColName: ~w, Term:~w", [ColName,Term])
 	},
-	html(td(\term(Term, Options))).
+	html(td(\term(Term,[]))).
 
 
 % create a hook in swish_render_table to render specific terms
@@ -254,4 +336,5 @@ fancy_row([ColName-Cell|Cells], Options) -->
 	},
 	user_or_default_fancy_term(ColName,Cell,Options),
 	fancy_row(Cells, Options).
+
 
