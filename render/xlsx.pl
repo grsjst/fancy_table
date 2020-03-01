@@ -17,7 +17,7 @@
 /** <module> Export to XLSX (and other formats)
 
 	Options for exporting tables that include:
-	- format
+	- format (see https://sheetjs.gitbooks.io/docs/#supported-output-formats)
 	- filenane
 
 */
@@ -31,7 +31,7 @@
 %	- filename
 term_rendering(Rows, _Vars, Options) -->
 	{
-		debug(xlsx, "try xlsx: ~p, options: ~p",[Rows, Options]),
+		% debug(xlsx, "try xlsx: ~p, options: ~p",[Rows, Options]),
 		(memberchk(export(FName0,WBOptions),Options) -> 
 			(
 				file_name_extension(Base,Ext,FName0),
@@ -93,12 +93,16 @@ to_csf_sheet(Rows,Sheet) :-
 to_csf_sheet([],_,_{}).
 to_csf_sheet([Row|Rows],R,Sheet) :-
 	Row =.. [_|Pairs],
-	findall(Cell,(nth1(C,Pairs,_-Value),to_csf_cell(C,R,Value,Cell)),Cells),
+	findall(Cell,(nth1(C,Pairs,Value0),remove_key(Value0,Value),to_csf_cell(C,R,Value,Cell)),Cells),
 	merge_dicts(Cells,SheetRow),
 	debug(xlsx,"row: ~w, cells: ~w",[Row,SheetRow]),
 	NR is R + 1,
 	to_csf_sheet(Rows,NR,SheetRows),
 	Sheet = SheetRows.put(SheetRow).
+
+% remove the key from K-V for export
+remove_key(_-V,V) :- !.
+remove_key(V,V).
 
 merge_dicts([],_{}).
 merge_dicts([Dict|Dicts],MergedDict) :-
