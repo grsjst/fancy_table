@@ -7,9 +7,9 @@
 :- use_module(library(http/term_html)).
 :- use_module(library(http/html_write)).
 :- use_module(library(http/js_write)).
-:- use_module(library(csv)).
 :- use_module(swish(lib/render)).
 :- use_module(swish(lib/render/table),[term_rendering/5 as table_term_rendering]).
+:- use_module(xlsx,[term_rendering/5 as export_term_rendering]).
 :- use_module(library(debug)).
 
 :- debug(fancy_table).
@@ -136,7 +136,7 @@ sort_rows(Rows,Keys,[SortKey|SortKeys],SortedRows) :-
 	nonvar(Order),!,
 	nth1(I,Keys,Key),
 	sort_rows(Rows,Keys,SortKeys,PartialSortedRows),
-	debug(fancy_table,"i: ~w, key:~w, keys:~w, order:~w, rows:~w",[I,Key,Keys,Order,Rows]),
+	debug(fancy_table,"i: ~w, key:~w, keys:~w, order:~w, rows:~p",[I,Key,Keys,Order,Rows]),
 	sort([I,2],Order,PartialSortedRows,SortedRows).
 
 sort_rows(Rows,Keys,[_|SortKeys],SortedRows) :-
@@ -175,105 +175,10 @@ fancy_table_footer([],_) --> html(p("0 records")).
 fancy_table_footer(Rows,Options) -->
 	{
 		length(Rows,N),
-		format(string(FooterMesg),"~w records",[N]),
-		(memberchk(export(FName,WBOptions),Options) -> 
-			(
-				debug(fancy_table,"export fname: ~w, options:~w,",[FName,WBOptions])
-			) ; 
-			(
-				WBOptions = _{bookType:'xlsx'},
-				FName = "export.xlsx"
-			)),
-		to_xlsx(Rows,WB,WBOptions)
+		format(string(FooterMesg),"~w records",[N])
 	},
-	html([
-		p([FooterMesg," ",a([href("")],"(export)"),
-		\js_script({|javascript(WB,FName,WBOptions)||
-(function() {
-  if ( $.ajaxScript ) {
-  	console.log("from fancy_table.pl");
-  	var a = $.ajaxScript.parent().find("a")[0];
-	requirejs.config({
-    	urlArgs: "ts="+new Date().getTime(),  /* prevent caching during development */
-	    paths: {
-	    	xlsx: '../node_modules/xlsx/dist/xlsx.full.min'
-	    }
-	 });
+	html(p([FooterMesg," ",\export_term_rendering(Rows,_,Options)])).
 
-	require(["jquery","xlsx"], function($,XLSX) {
-		var wb = WB;
-		var wbOptions = WBOptions;
-		var fname = FName;
-		$(a).click(function(e){
-			e.preventDefault();
-			XLSX.writeFile(wb, fname, wbOptions);
-			});
-	});  }
-})();
-		  |})
-		])]).
-
-to_xlsx(Rows,CSF_WB,_Options) :-
-	Rows = [Row|_], functor(Row,_,NColumns),
-	length(Rows,NRows),
-	to_a1(1,1,TopLeft),
-	to_a1(NColumns,NRows,BottomRight),
-	format(atom(Range),"~w:~w",[TopLeft,BottomRight]),
-	to_csf_sheet(Rows,Sheet),
-	NSheet = Sheet.put('!ref',Range),
-	CSF_WB = _{
-		'Sheets' : _{
-			'Sheet1' : NSheet
-		},
-		'SheetNames' : ['Sheet1']  
-	}.
-
-to_csf_sheet(Rows,Sheet) :-
-	to_csf_sheet(Rows,1,Sheet).
-
-to_csf_sheet([],_,_{}).
-to_csf_sheet([Row|Rows],R,Sheet) :-
-	Row =.. [_|Pairs],
-	findall(Cell,(nth1(C,Pairs,_-Value),to_csf_cell(C,R,Value,Cell)),Cells),
-	merge_dicts(Cells,SheetRow),
-	debug(fancy_table,"row: ~w, cells: ~w",[Row,SheetRow]),
-	NR is R + 1,
-	to_csf_sheet(Rows,NR,SheetRows),
-	Sheet = SheetRows.put(SheetRow).
-
-merge_dicts([],_{}).
-merge_dicts([Dict|Dicts],MergedDict) :-
-	merge_dicts(Dicts,MergedDict0),
-	MergedDict = MergedDict0.put(Dict).
-
-to_csf_cell(C,R,Value,CSFCell) :-
-	to_a1(C,R,A1),
-	to_cell(Value,Cell),
-	CSFCell = _{}.put(A1,Cell).
-
-to_cell(Date,_{v:Value,t:d, z:'dd/mm/yyyy'}) :- Date = date(_,_,_),format_time(atom(Value),"%FT%T%z",Date),!. % ISO8601
-to_cell(DateTime,_{v:Value,t:d, z:'dd/mm/yyyy h:mm'}) :- DateTime = date(_,_,_,_,_,_,_,_,_),format_time(atom(Value),"%FT%T%z",DateTime),!. % ISO8601	
-to_cell(Boolean,_{v:Boolean,t:b}) :- memberchk(Boolean,[true,false]),!.
-to_cell(Number,_{v:Number,t:n}) :- number(Number),!.
-to_cell(String,_{v:String,t:s}) :- string(String),!.
-to_cell(Atom,_{v:Value,t:s}) :- atom(Atom),atom_string(Atom,Value),!.
-to_cell(Term,Cell) :- Term =.. [_,Value],!, to_cell(Value,Cell). % tag(100) -> 100
-to_cell(Term,_{v:Value,t:s}) :- term_string(Term,Value),!,debug(fancy_table,"unknown type: ~p",[Term]).
-
-to_a1(C,R,A1) :-
-    to_base(26,C,L),
-    As = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z'],
-    findall(A0,(member(N,L),nth1(N,As,A0)),Txt),
-    text_to_string(Txt,Alpha),
-    format(atom(A1),"~w~w",[Alpha,R]).
-
-to_base(Base,N,[R]) :-
-    divmod(N, Base, 0, R),!.
-
-to_base(Base,N,L) :-
-    divmod(N, Base, Q, R),
-    to_base(Base,Q,Rs),
-    append(Rs,[R],L).
 
 
 %%	fancy_term(Term, +Options)
