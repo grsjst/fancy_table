@@ -12,6 +12,8 @@
 :- use_module(xlsx,[term_rendering/5 as export_term_rendering]).
 :- use_module(library(debug)).
 
+:- use_module(stringify).
+
 :- debug(fancy_table).
 :- debug(fancy_table,"Fancy table renderer loaded",[]).
 
@@ -55,7 +57,8 @@
 term_rendering(Dicts, _Vars, Options) -->
 	{
 		% debug(fancy_table, "try fancy table: ~p",[Dicts]),
-		to_rows(Dicts,Tag,Rows), % Rows = list of compounds -> to rows ()
+		dicts_to_same_keys(Dicts,dict_fill(null),NDicts),
+		to_rows(NDicts,Tag,Rows), % Rows = list of compounds -> to rows ()
 		match_header(Options,Rows,FancyHeader),!,
 		debug(fancy_table, "use fancy table - header:~w, options:~w",[FancyHeader,Options]),
 		header_keys(FancyHeader,Tag,SortKeys,Keys),
@@ -68,7 +71,8 @@ term_rendering(Dicts, _Vars, Options) -->
 term_rendering(Dicts, _Vars, Options) -->
 	{
 		% debug(fancy_table, "try table (with fancy terms): ~p",[Dicts]),
-		to_rows(Dicts,Tag,Rows), % Rows = list of compounds -> to rows ()
+		dicts_to_same_keys(Dicts,dict_fill(null),NDicts),
+		to_rows(NDicts,Tag,Rows), % Rows = list of compounds -> to rows ()
 		common_keys(Rows,Tag,Keys),
 		FancyHeader =.. [Tag|Keys],
 		delete(Options,header(_),NOptions)
@@ -76,7 +80,7 @@ term_rendering(Dicts, _Vars, Options) -->
 	fancy_table_rendering(FancyHeader,Rows,NOptions).
 
 
-%!	to_rows(+Dicts:list(dict),-Tag:atom, -Rows:list(term)) is det.
+%!	to_rows(?Dicts:list(dict),?Tag:atom, ?Rows:list(term)) is det.
 %	converts dicts to corresponding compound representation
 % 		Tag is the dict tag, which is represented as functor of the compound
 %			in case the Tag isn't an atom, "row" is used
@@ -84,12 +88,28 @@ term_rendering(Dicts, _Vars, Options) -->
 %
 % 	e.g. to_rows([_{x:1,y:1,z:2},_{x:2,y:3,z:1}],T,Rs).
 to_rows([],Tag,[]) :- (var(Tag) -> Tag = row ; true),!.
+% to_rows(+Dicts,?Tags,-Rows)
 to_rows([Dict|Dicts],Tag,[Row|Rows]) :-
-	is_dict(Dict,Tag),
+	nonvar(Dict),
+	is_dict(Dict,Tag),!,
 	to_rows(Dicts,Tag,Rows),
 	dict_pairs(Dict,Tag,Pairs),
 	Row =.. [Tag|Pairs].
 
+% to_rows(-Dicts,?Tags,+Rows)
+to_rows([Dict|Dicts],Tag,[Row|Rows]) :-
+	nonvar(Row),
+	Row =.. [Tag|Pairs],!,
+	dict_pairs(Dict,Tag,Pairs),
+	to_rows(Dicts,Tag,Rows).
+
+% like dict_slice/3
+slice_rows(_,[],[]).
+slice_rows(Keys,[RowIn|RowsIn],[RowOut|RowsOut]) :-
+	RowIn =.. [Tag|Pairs],
+	findall(Key-Value,(member(Key,Keys),member(Key-Value,Pairs)),SlicedPairs),
+	RowOut =..[Tag|SlicedPairs],
+	slice_rows(Keys,RowsIn,RowsOut).
 
 %! 	match_header(+Options,+Rows,-Header) is nondet.
 %	from the Options select a header that matches the given Tag and the layout of the Rows 
@@ -170,20 +190,24 @@ get_keys(Rows,I,[Key|Keys]) :-
 
 fancy_table_rendering(Header,Rows,Options) -->
 	{
+		debug(fancy_table,"header1: ~w",[Header]),
 		header_keys(Header,Tag,_,Keys),
+		slice_rows(Keys,Rows,SlicedRows),
+		debug(fancy_table,"SlicedRows: ~w",[SlicedRows]),
 		NHeader =.. [Tag|Keys],
 		(memberchk(fancy_terms_file(GittyFile),Options) -> 
 			(
 				debug(fancy_table,"load gittyfile: ~w",[GittyFile]),
 				use_gitty_file(GittyFile)
-			) ; true)
+			) ; true),
+		debug(fancy_table,"header2: ~w ~w",[Header,NHeader])
 	},
 	html(div([class(['export-dom']), style('display:inline-block'),
 		   'data-render'('Fancy Table')
 		 ],
 		 [  
-		 	\table_term_rendering(Rows,_,[header(NHeader)|Options]),
-		 	\fancy_table_footer(Rows,Options)		 	
+		 	\table_term_rendering(SlicedRows,_,[header(NHeader)|Options]),
+		 	\fancy_table_footer(SlicedRows,Options)		 	
 		 ])).
  
 fancy_table_footer([],_) --> html(p("0 records")).
@@ -213,17 +237,20 @@ user_or_default_fancy_term(ColName,Cell,Options) -->
 
 user_or_default_fancy_term(ColName,Cell,Options) --> def_fancy_term(ColName,Cell,Options).
 
+def_fancy_term(_,null, _Options) -->
+	html(td([])).
+
 def_fancy_term(_,Date, _Options) -->
 	{   
 		Date = date(_,_,_),!,
-		format_time(string(DateStr),"%d %b %Y",Date)
+		stringify_term(Date,DateStr)
 	},
 	html(td(\term(DateStr,[]))).
 
 def_fancy_term(_,DateTime, _Options) -->
 	{   
 		DateTime = date(_,_,_,_,_,_,_,_,_),!,
-		format_time(string(DateStr),"%FT%T%z",DateTime) % ISO8601
+		stringify_term(DateTime,DateStr) % ISO8601
 	},
 	html(td(\term(DateStr,[]))).
 
@@ -243,6 +270,13 @@ def_fancy_term(_,URI, _Options) -->
 	},
 	html(td(a(href(URI),URI))).
 
+% default
+def_fancy_term(_,Term, _Options) -->
+	{ 
+		stringify_term(Term,TermStr) % ISO8601
+	},
+	html(td(\term(TermStr,[]))).
+
 def_fancy_term(ColName,value(Term), Options) --> def_fancy_term(ColName,Term, Options).
 
 % default
@@ -260,7 +294,3 @@ fancy_row([],_) --> !,[].
 fancy_row([ColName-Cell|Cells], Options) --> 
 	user_or_default_fancy_term(ColName,Cell,Options),
 	fancy_row(Cells, Options).
-
-
-
-

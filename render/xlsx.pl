@@ -8,6 +8,8 @@
 :- use_module(swish(lib/render)).
 :- use_module(library(debug)).
 
+:- use_module(stringify).
+
 :- debug(xlsx).
 :- debug(xlsx,"XLSX renderer loaded",[]).
 
@@ -115,13 +117,16 @@ to_csf_cell(C,R,Value,CSFCell) :-
 	to_cell(Value,Cell),
 	CSFCell = _{}.put(A1,Cell).
 
-to_cell(Date,_{v:Value,t:d, z:'dd/mm/yyyy'}) :- Date = date(_,_,_),format_time(atom(Value),"%FT%T%z",Date),!. % ISO8601
-to_cell(DateTime,_{v:Value,t:d, z:'dd/mm/yyyy h:mm'}) :- DateTime = date(_,_,_,_,_,_,_,_,_),format_time(atom(Value),"%FT%T%z",DateTime),!. % ISO8601	
+to_cell(null,_{}).
+to_cell(Date,_{v:Value,t:d, z:'dd/mm/yyyy'}) :- Date = date(_,_,_),!,stringify_term(Date,Value). % ISO8601
+to_cell(DateTime,_{v:Value,t:d, z:'dd/mm/yyyy h:mm'}) :- DateTime = date(_,_,_,_,_,_,_,_,_),!,stringify_term(DateTime,Value). % ISO8601	
 to_cell(Boolean,_{v:Boolean,t:b}) :- memberchk(Boolean,[true,false]),!.
 to_cell(Number,_{v:Number,t:n}) :- number(Number),!.
 to_cell(String,_{v:String,t:s}) :- string(String),!.
 to_cell(Atom,_{v:Value,t:s}) :- atom(Atom),atom_string(Atom,Value),!.
-to_cell(Term,Cell) :- Term =.. [_,Value],!, to_cell(Value,Cell). % tag(100) -> 100
+to_cell(Compound,Cell) :- compound(Compound),Compound =.. [_,Term],!,to_cell(Term,Cell).
+to_cell(Term,_{v:Value,t:s}) :- compound(Term),!,stringify_term(Term,Value). % tag(100) -> tag - 100
+
 to_cell(Term,_{v:Value,t:s}) :- term_string(Term,Value),!,debug(xlsx,"unknown type: ~p",[Term]).
 
 to_a1(C,R,A1) :-
@@ -138,3 +143,4 @@ to_base(Base,N,L) :-
     divmod(N, Base, Q, R),
     to_base(Base,Q,Rs),
     append(Rs,[R],L).
+
