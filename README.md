@@ -1,13 +1,15 @@
 # FancyTable for SWISH (fancy_table)
 
-FancyTable is a SWISH plugin (https://github.com/SWI-Prolog/SWISH) to generate HTML tables, with some fancy features, including:
+FancyTable is a SWISH plugin (https://github.com/SWI-Prolog/SWISH) to generate HTML tables, with some 
+fancy features, including:
 - sorting of columns
 - user defined fancy rendering of specific data types, values a columns.
 - export to spreadsheet format (e.g xslx, ods, csv).
 
 Under the hood, it uses: 
 - The SWISH table render plugin (see https://swish.swi-prolog.org/example/render_table.swinb)
-- The XLSX render (included in this GIT repository), which is used to to export the data using SheetJS (see https://github.com/SheetJS/sheetjs) 
+- The XLSX render (included in this GIT repository), which is used to to export the data using 
+	SheetJS (see https://github.com/SheetJS/sheetjs).  
 
 ## Installation
 
@@ -31,8 +33,8 @@ yarn add xlsx
 Edit `$PLUGIN_FANCYTABLE/fancy_table.pl` and edit the following line to set `$PLUGIN_FANCYTABLE` 
 
 ```swipl
-% $PLUGIN_FANCYTABLE should be set to the root of PLUGIN_SVGDOTJS
-user:file_search_path(plugin_svgdotjs, $PLUGIN_FANCYTABLE)
+% $PLUGIN_FANCYTABLE should be set to the root of PLUGIN_FANCYTABLE
+user:file_search_path(PLUGIN_FANCYTABLE, $PLUGIN_FANCYTABLE)
 ```
 
 Create a symbolic link (or copy) from `$PLUGIN_FANCYTABLE/fancy_table.pl` to `$SWISH_DIR/config-available`
@@ -58,13 +60,13 @@ In your SWISH programme add the directive:
 :- use_rendering(fancy_table).   % 
 ```
 
-As an example, run the following query to render a rectangle:
+As an example, run the following query to render a table with a signle row:
 
 ```swipl
 X = [_{a:1,b:date(2020,1,1)}].
 ```
 
-The PLUGIN_SVGDOTJS renderer defines the following options:
+The PLUGIN_FANCYTABLE renderer defines the following options:
 - `header/1` - it contains a compound of the form row(id(>=),label(\_)), which denotes the table has two columns (id, label) and is sorted
 	on the first
 - `export/2` - contains the filename for export, and options passed to XSLX (see https://sheetjs.gitbooks.io/docs/#writing-options)
