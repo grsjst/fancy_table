@@ -206,8 +206,21 @@ fancy_table_rendering(Header,Rows,Options) -->
 		   'data-render'('Fancy Table')
 		 ],
 		 [  
+		 	% The JS function is to set the 'draggable' attribute of the parent 
+		 	% (to allow for selection of text to copy) 
+		 	\js_script(
+'(function() {
+	if ( $.ajaxScript ) {
+  		//console.log("from fancy_table.pl");
+		var div = $.ajaxScript.parents(".render-multi")[0];
+		require(["jquery"], function($) {
+    		$(div).attr("draggable","false");
+    		})
+    }
+    })()'
+),
 		 	\table_term_rendering(SlicedRows,_,[header(NHeader)|Options]),
-		 	\fancy_table_footer(SlicedRows,Options)		 	
+		 	\fancy_table_footer(Rows,Options)		 	
 		 ])).
  
 fancy_table_footer([],_) --> html(p("0 records")).
