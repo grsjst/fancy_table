@@ -190,17 +190,15 @@ get_keys(Rows,I,[Key|Keys]) :-
 
 fancy_table_rendering(Header,Rows,Options) -->
 	{
-		debug(fancy_table,"header1: ~w",[Header]),
+		% debug(fancy_table,"header1: ~w",[Header]),
 		header_keys(Header,Tag,_,Keys),
 		slice_rows(Keys,Rows,SlicedRows),
-		debug(fancy_table,"SlicedRows: ~w",[SlicedRows]),
 		NHeader =.. [Tag|Keys],
 		(memberchk(fancy_terms_file(GittyFile),Options) -> 
 			(
 				debug(fancy_table,"load gittyfile: ~w",[GittyFile]),
 				use_gitty_file(GittyFile)
-			) ; true),
-		debug(fancy_table,"header2: ~w ~w",[Header,NHeader])
+			) ; true)
 	},
 	html(div([class(['export-dom']), style('display:inline-block'),
 		   'data-render'('Fancy Table')
