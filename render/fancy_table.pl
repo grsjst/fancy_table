@@ -220,7 +220,7 @@ fancy_table_rendering(Header,Rows,Options) -->
     })()'
 ),
 		 	\table_term_rendering(SlicedRows,_,[header(NHeader)|Options]),
-		 	\fancy_table_footer(Rows,Options)		 	
+		 	\fancy_table_footer(SlicedRows,Options)		 	
 		 ])).
  
 fancy_table_footer([],_) --> html(p("0 records")).
